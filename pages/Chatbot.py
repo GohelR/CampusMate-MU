@@ -1,4 +1,21 @@
 # pages/1_Chatbot.py
+# Sidebar Navigation
+st.sidebar.image("assets/logo.png", width=60)
+st.sidebar.markdown("## 📌 Navigation")
+
+pages = {
+    "🏠 Home": "Home.py",
+    "💬 Chatbot": "Chatbot.py",
+    "📚 Student Section": "Student_Section.py",
+    "📢 Announcements": "Announcements.py",
+    "🎉 Events": "Events.py",
+    "🗺 Campus Map": "Campus_Map.py",
+    "🛠 Admin Panel": "Admin.py"
+}
+
+for name, link in pages.items():
+    st.sidebar.markdown(f"[{name}]({link})")
+
 import streamlit as st
 from utils import load_faq, load_model_and_faiss, similarity_search
 
