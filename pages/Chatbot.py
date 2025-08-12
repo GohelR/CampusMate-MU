@@ -6,10 +6,6 @@ st.set_page_config(page_title="Chatbot", page_icon="🤖")
 st.title("🤖 CampusMate Chatbot")
 st.write("Ask student-related questions (FAQ-based).")
 
-# load model
-with st.spinner("Loading AI model and index... (cached)"):
-    model, index, _ = load_model_and_faiss(df)
-
 query = st.text_input("💬 Type your question here")
 if st.button("Ask") or (query and st.session_state.get("auto_ask", False)):
     if not query:
