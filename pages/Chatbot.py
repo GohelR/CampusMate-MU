@@ -7,8 +7,6 @@ st.title("🤖 CampusMate Chatbot")
 st.write("Ask student-related questions (FAQ-based).")
 
 df = load_faq()
-st.subheader("")
-st.dataframe(df.head())
 
 # load model
 with st.spinner("Loading AI model and index... (cached)"):
