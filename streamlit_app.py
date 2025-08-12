@@ -15,10 +15,18 @@ st.write("Ask me anything from the FAQ!")
 # Load FAQ CSV
 # --------------------------
 CSV_FILE = "data/faq.csv"
+
 try:
     df = pd.read_csv(CSV_FILE)
 except FileNotFoundError:
     st.error(f"❌ Could not find `{CSV_FILE}`. Please upload it to your repo.")
+    st.stop()
+
+# Ensure correct column names (case-insensitive match)
+df.columns = df.columns.str.strip().str.lower()  # normalize to lowercase
+
+if "question" not in df.columns or "answer" not in df.columns:
+    st.error("❌ CSV must contain 'Question' and 'Answer' columns.")
     st.stop()
 
 # --------------------------
