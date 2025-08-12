@@ -1,4 +1,6 @@
 # pages/1_Chatbot.py
+import streamlit as st
+from utils import load_faq, load_model_and_faiss, similarity_search
 # Sidebar Navigation
 st.sidebar.image("assets/logo.png", width=60)
 st.sidebar.markdown("## 📌 Navigation")
@@ -15,9 +17,6 @@ pages = {
 
 for name, link in pages.items():
     st.sidebar.markdown(f"[{name}]({link})")
-
-import streamlit as st
-from utils import load_faq, load_model_and_faiss, similarity_search
 
 st.set_page_config(page_title="Chatbot", page_icon="🤖")
 st.title("🤖 CampusMate Chatbot")
