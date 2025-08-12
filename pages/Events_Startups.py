@@ -13,7 +13,7 @@ events = [
 cols = st.columns(3)
 for i, ev in enumerate(events):
     with cols[i]:
-        st.image("https://via.placeholder.com/300x150?text="+ev["title"].replace(" ","+"))
+        st.image("https://www.google.com/url?sa=i&url=https%3A%2F%2Fwww.forbes.com%2Fsites%2Fbernardmarr%2F2024%2F10%2F02%2Fwhy-hybrid-ai-is-the-next-big-thing-in-tech%2F&psig=AOvVaw2XV4PYoKtLO9-wFMdto28O&ust=1755086577883000&source=images&cd=vfe&opi=89978449&ved=0CBUQjRxqFwoTCNiBh6udhY8DFQAAAAAdAAAAABAE"+ev["title"].replace(" ","+"))
         st.subheader(ev["title"])
         st.write(ev["date"])
         st.write(ev["desc"])
