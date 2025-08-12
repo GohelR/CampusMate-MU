@@ -6,10 +6,6 @@ st.set_page_config(page_title="Chatbot", page_icon="🤖")
 st.title("🤖 CampusMate Chatbot")
 st.write("Ask student-related questions (FAQ-based).")
 
-df = load_faq()
-st.subheader("Sample FAQ (first 5)")
-st.dataframe(df.head())
-
 # load model
 with st.spinner("Loading AI model and index... (cached)"):
     model, index, _ = load_model_and_faiss(df)
