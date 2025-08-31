@@ -28,10 +28,7 @@ rooms = list(G.nodes)
 start = st.selectbox("📍 From (Your Room):", rooms)
 end = st.selectbox("🎯 To (Destination Room):", rooms)
 
-# -------------------------
-# Dummy coordinates for demo
-# (replace with real lat/lon later)
-# -------------------------
+# Dummy coordinates
 coords = {
     "MB107": [22.301, 70.781],
     "MB108": [22.302, 70.782],
@@ -42,50 +39,34 @@ coords = {
 }
 
 # -------------------------
-# Session State (persist map + path)
+# Store state (fix blinking)
 # -------------------------
-if "map_obj" not in st.session_state:
-    st.session_state.map_obj = None
+if "map" not in st.session_state:
+    st.session_state.map = None
     st.session_state.path = None
 
-# Only rebuild map when button is clicked
 if st.button("🚀 Get Directions"):
     try:
         path = nx.shortest_path(G, source=start, target=end, weight="distance")
-        st.session_state.path = path  # save path in session
+        st.session_state.path = path
 
-        # Extract coordinates
+        m = folium.Map(location=[22.303, 70.783], zoom_start=18)
         route_coords = [coords[node] for node in path]
-
-        # Map visualization - center at route midpoint
-        m = folium.Map(location=route_coords[0], zoom_start=18)
-
-        # Draw path
         folium.PolyLine(route_coords, color="blue", weight=5).add_to(m)
+        folium.Marker(coords[start], popup="Start", icon=folium.Icon(color="green")).add_to(m)
+        folium.Marker(coords[end], popup="End", icon=folium.Icon(color="red")).add_to(m)
 
-        # Markers
-        folium.Marker(route_coords[0], popup=f"Start: {start}", icon=folium.Icon(color="green")).add_to(m)
-        folium.Marker(route_coords[-1], popup=f"End: {end}", icon=folium.Icon(color="red")).add_to(m)
-
-        # Auto-fit map bounds to the full route
-        m.fit_bounds(route_coords)
-
-        st.session_state.map_obj = m  # persist map
+        st.session_state.map = m
 
     except nx.NetworkXNoPath:
         st.error("⚠️ No path found between selected rooms.")
 
 # -------------------------
-# Show the map without reloading
+# Show stored map + path
 # -------------------------
-if st.session_state.map_obj is not None:
-    # This ensures the map stays stable (no blinking)
-    st_folium(st.session_state.map_obj, width=700, height=500, key="campus_map")
+if st.session_state.map:
+    st_folium(st.session_state.map, width=700, height=500)
 
-# -------------------------
-# Step-by-step instructions
-# -------------------------
-if st.session_state.path is not None:
     st.subheader("📝 Directions")
-    for i in range(len(st.session_state.path)-1):
+    for i in range(len(st.session_state.path) - 1):
         st.write(f"➡️ Walk from **{st.session_state.path[i]}** to **{st.session_state.path[i+1]}**")
