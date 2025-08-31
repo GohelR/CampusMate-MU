@@ -48,6 +48,7 @@ if "map_obj" not in st.session_state:
     st.session_state.map_obj = None
     st.session_state.path = None
 
+# Only rebuild map when button is clicked
 if st.button("🚀 Get Directions"):
     try:
         path = nx.shortest_path(G, source=start, target=end, weight="distance")
@@ -75,10 +76,11 @@ if st.button("🚀 Get Directions"):
         st.error("⚠️ No path found between selected rooms.")
 
 # -------------------------
-# Display persisted map
+# Show the map without reloading
 # -------------------------
 if st.session_state.map_obj is not None:
-    st_folium(st.session_state.map_obj, width=700, height=500)
+    # This ensures the map stays stable (no blinking)
+    st_folium(st.session_state.map_obj, width=700, height=500, key="campus_map")
 
 # -------------------------
 # Step-by-step instructions
@@ -87,4 +89,3 @@ if st.session_state.path is not None:
     st.subheader("📝 Directions")
     for i in range(len(st.session_state.path)-1):
         st.write(f"➡️ Walk from **{st.session_state.path[i]}** to **{st.session_state.path[i+1]}**")
-
