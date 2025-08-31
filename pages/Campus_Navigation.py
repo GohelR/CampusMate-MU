@@ -8,7 +8,7 @@ st.write("Select your current room and destination to get directions inside camp
 
 # Dummy room coordinates (replace with real campus map data later)
 rooms = {
-    "MB201": [22.3039, 70.8022],  
+    "MB201": [22.3039, 70.8022],  # Example: Rajkot Lat/Lon
     "MA202": [22.3050, 70.8005],
     "MB107": [22.3045, 70.8010],
     "MA407": [22.3060, 70.8030],
@@ -27,13 +27,13 @@ if st.session_state.show_map:
     start = rooms[from_room]
     end = rooms[to_room]
 
-    st.success(f"📌 Path from **{from_room}** ➝ **{to_room}**")
+    st.success(f"Showing path from **{from_room}** ➝ **{to_room}**")
 
     # Path line
     path = [start, end]
 
-    # --- Path Layer (blue line) ---
-    path_layer = pdk.Layer(
+    # Pydeck map
+    layer = pdk.Layer(
         "PathLayer",
         data=[{"path": path}],
         get_path="path",
@@ -42,44 +42,11 @@ if st.session_state.show_map:
         width_min_pixels=5,
     )
 
-    # --- Marker Layer (pins) ---
-    markers = [
-        {"name": from_room, "lat": start[0], "lon": start[1], "color": [0, 200, 0]},
-        {"name": to_room, "lat": end[0], "lon": end[1], "color": [200, 0, 0]},
-    ]
-    marker_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=markers,
-        get_position=["lon", "lat"],
-        get_color="color",
-        get_radius=15,
-    )
-
-    # --- Text Labels for Rooms ---
-    text_layer = pdk.Layer(
-        "TextLayer",
-        data=markers,
-        get_position=["lon", "lat"],
-        get_text="name",
-        get_size=20,
-        get_color=[255, 255, 255],
-        get_angle=0,
-        get_alignment_baseline="'bottom'",
-    )
-
-    # --- Map View ---
     view_state = pdk.ViewState(
-        latitude=(start[0] + end[0]) / 2,
-        longitude=(start[1] + end[1]) / 2,
-        zoom=17,
-        pitch=50,  # tilt for 3D effect
+        latitude=start[0],
+        longitude=start[1],
+        zoom=16,
+        pitch=45,
     )
 
-    # --- Show Map ---
-    st.pydeck_chart(
-        pdk.Deck(
-            layers=[path_layer, marker_layer, text_layer],
-            initial_view_state=view_state,
-            map_style="mapbox://styles/mapbox/satellite-streets-v12",  # satellite 3D look
-        )
-    )
+    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state))
