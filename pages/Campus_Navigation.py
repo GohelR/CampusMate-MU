@@ -1,52 +1,84 @@
 import streamlit as st
-import pydeck as pdk
+import pandas as pd
+import networkx as nx
+import folium
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Campus Navigation Guide", page_icon="🗺️")
-
-st.title("🌍 Campus Navigation Guide")
+st.set_page_config(page_title="Campus Navigation", page_icon="🗺️")
+st.title("🗺️ Campus Navigation Guide")
 st.write("Select your current room and destination to get directions inside campus.")
 
-# Dummy room coordinates (replace with real campus map data later)
-rooms = {
-    "MB201": [22.3039, 70.8022],  # Example: Rajkot Lat/Lon
-    "MA202": [22.3050, 70.8005],
-    "MB107": [22.3045, 70.8010],
-    "MA407": [22.3060, 70.8030],
+# -------------------------
+# Load campus graph
+# -------------------------
+CSV_FILE = "data/campus_graph.csv"
+
+try:
+    edges = pd.read_csv(CSV_FILE)
+except FileNotFoundError:
+    st.error(f"❌ Could not find {CSV_FILE}. Please upload it.")
+    st.stop()
+
+# Create graph
+G = nx.Graph()
+for _, row in edges.iterrows():
+    G.add_edge(row["start"], row["end"], weight=row["distance"])
+
+rooms = list(G.nodes)
+start = st.selectbox("📍 From (Your Room):", rooms)
+end = st.selectbox("🎯 To (Destination Room):", rooms)
+
+# -------------------------
+# Dummy coordinates for demo
+# (replace with real lat/lon later)
+# -------------------------
+coords = {
+    "MB107": [22.301, 70.781],
+    "MB108": [22.302, 70.782],
+    "MB201": [22.303, 70.783],
+    "MA101": [22.304, 70.784],
+    "MA202": [22.305, 70.785],
+    "MA407": [22.306, 70.786],
 }
 
-from_room = st.selectbox("📍 From (Your Room):", list(rooms.keys()))
-to_room = st.selectbox("🎯 To (Destination Room):", list(rooms.keys()))
-
-if "show_map" not in st.session_state:
-    st.session_state.show_map = False
+# -------------------------
+# Button + Session state to persist map
+# -------------------------
+if "map_obj" not in st.session_state:
+    st.session_state.map_obj = None
+    st.session_state.path = None
 
 if st.button("🚀 Get Directions"):
-    st.session_state.show_map = True
+    try:
+        path = nx.shortest_path(G, source=start, target=end, weight="distance")
+        st.session_state.path = path  # save path in session
 
-if st.session_state.show_map:
-    start = rooms[from_room]
-    end = rooms[to_room]
+        # Map visualization
+        m = folium.Map(location=[22.303, 70.783], zoom_start=18)
 
-    st.success(f"Showing path from **{from_room}** ➝ **{to_room}**")
+        # Draw path
+        route_coords = [coords[node] for node in path]
+        folium.PolyLine(route_coords, color="blue", weight=5).add_to(m)
 
-    # Path line
-    path = [start, end]
+        # Markers
+        folium.Marker(coords[start], popup="Start", icon=folium.Icon(color="green")).add_to(m)
+        folium.Marker(coords[end], popup="End", icon=folium.Icon(color="red")).add_to(m)
 
-    # Pydeck map
-    layer = pdk.Layer(
-        "PathLayer",
-        data=[{"path": path}],
-        get_path="path",
-        get_color=[0, 128, 255],
-        width_scale=2,
-        width_min_pixels=5,
-    )
+        st.session_state.map_obj = m  # persist map in session
 
-    view_state = pdk.ViewState(
-        latitude=start[0],
-        longitude=start[1],
-        zoom=16,
-        pitch=45,
-    )
+    except nx.NetworkXNoPath:
+        st.error("⚠️ No path found between selected rooms.")
 
-    st.pydeck_chart(pdk.Deck(layers=[layer], initial_view_state=view_state))
+# -------------------------
+# Display persisted map
+# -------------------------
+if st.session_state.map_obj is not None:
+    st_folium(st.session_state.map_obj, width=700, height=500)
+
+# -------------------------
+# Step-by-step instructions
+# -------------------------
+if st.session_state.path is not None:
+    st.subheader("📝 Directions")
+    for i in range(len(st.session_state.path)-1):
+        st.write(f"➡️ Walk from **{st.session_state.path[i]}** to **{st.session_state.path[i+1]}**")
