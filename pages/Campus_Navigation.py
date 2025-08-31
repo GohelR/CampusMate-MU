@@ -42,7 +42,7 @@ coords = {
 }
 
 # -------------------------
-# Button + Session state to persist map
+# Session State (persist map + path)
 # -------------------------
 if "map_obj" not in st.session_state:
     st.session_state.map_obj = None
@@ -53,18 +53,23 @@ if st.button("🚀 Get Directions"):
         path = nx.shortest_path(G, source=start, target=end, weight="distance")
         st.session_state.path = path  # save path in session
 
-        # Map visualization
-        m = folium.Map(location=[22.303, 70.783], zoom_start=18)
+        # Extract coordinates
+        route_coords = [coords[node] for node in path]
+
+        # Map visualization - center at route midpoint
+        m = folium.Map(location=route_coords[0], zoom_start=18)
 
         # Draw path
-        route_coords = [coords[node] for node in path]
         folium.PolyLine(route_coords, color="blue", weight=5).add_to(m)
 
         # Markers
-        folium.Marker(coords[start], popup="Start", icon=folium.Icon(color="green")).add_to(m)
-        folium.Marker(coords[end], popup="End", icon=folium.Icon(color="red")).add_to(m)
+        folium.Marker(route_coords[0], popup=f"Start: {start}", icon=folium.Icon(color="green")).add_to(m)
+        folium.Marker(route_coords[-1], popup=f"End: {end}", icon=folium.Icon(color="red")).add_to(m)
 
-        st.session_state.map_obj = m  # persist map in session
+        # Auto-fit map bounds to the full route
+        m.fit_bounds(route_coords)
+
+        st.session_state.map_obj = m  # persist map
 
     except nx.NetworkXNoPath:
         st.error("⚠️ No path found between selected rooms.")
@@ -82,3 +87,4 @@ if st.session_state.path is not None:
     st.subheader("📝 Directions")
     for i in range(len(st.session_state.path)-1):
         st.write(f"➡️ Walk from **{st.session_state.path[i]}** to **{st.session_state.path[i+1]}**")
+
