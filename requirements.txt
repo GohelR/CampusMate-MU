@@ -7,4 +7,6 @@ uvicorn
 faiss-cpu
 numpy
 plotly
+streamlit-folium
 folium
+networkx
