@@ -7,3 +7,4 @@ uvicorn
 faiss-cpu
 numpy
 plotly
+folium
