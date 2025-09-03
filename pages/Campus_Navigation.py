@@ -18,8 +18,8 @@ st.markdown(
     </style>
     """, unsafe_allow_html=True
 )
-st.markdown('<div class="header"><h1>🏫 CampusMate — Indoor+Outdoor Navigation</h1></div>', unsafe_allow_html=True)
-st.markdown("This page uses your browser location (allow permission) and computes an indoor + outdoor route (demo) with a 3D MapLibre view and animated walker.")
+st.markdown('<div class="header"><h1>🏫 CampusMate : Indoor & Outdoor Navigation</h1></div>', unsafe_allow_html=True)
+st.markdown("DEMo")
 
 # ------------------------------
 # Data files
