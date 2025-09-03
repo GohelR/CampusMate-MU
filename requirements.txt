@@ -7,3 +7,7 @@ streamlit-folium>=0.13.0
 folium>=0.14.0
 branca>=0.6.0
 streamlit-js-eval>=0.1.2
+streamlit
+pandas
+networkx
+pydeck==0.9.1
