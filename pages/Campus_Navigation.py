@@ -1,77 +1,73 @@
 import streamlit as st
-import networkx as nx
-import folium
-from streamlit_folium import st_folium
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Campus Navigation", page_icon="🗺️", layout="wide")
 
-st.title("🗺️ Campus Navigation Guide")
-st.write("Select your current room and destination to get step-by-step directions inside campus.")
+st.title("🗺️ Campus Navigation (Mapbox-Style with Routing)")
 
-# -------------------------
-# Campus Graph (Demo)
-# -------------------------
-edges = [
-    ("MB107", "MB108", 5),
-    ("MB108", "MB201", 7),
-    ("MB201", "MA101", 12),
-    ("MA101", "MA202", 8),
-    ("MA202", "MA407", 15),
-]
-
-# Build graph
-G = nx.Graph()
-for start, end, dist in edges:
-    G.add_edge(start, end, weight=dist)
-
-rooms = list(G.nodes)
-start = st.selectbox("📍 From (Your Room):", rooms)
-end = st.selectbox("🎯 To (Destination Room):", rooms)
-
-# -------------------------
-# Dummy coordinates (replace with real)
-# -------------------------
-coords = {
-    "MB107": [22.301, 70.781],
-    "MB108": [22.302, 70.782],
-    "MB201": [22.303, 70.783],
-    "MA101": [22.304, 70.784],
-    "MA202": [22.305, 70.785],
-    "MA407": [22.306, 70.786],
+# Dummy campus coordinates (replace with real ones later)
+campus_coords = {
+    "MB107": [70.781, 22.301],
+    "MB201": [70.782, 22.303],
+    "MA202": [70.784, 22.305],
+    "MA407": [70.786, 22.306],
 }
 
-# -------------------------
-# Show map only when user clicks
-# -------------------------
-if st.button("🚀 Get Directions"):
-    try:
-        path = nx.shortest_path(G, source=start, target=end, weight="distance")
-        st.success(" ➝ ".join(path))
+# UI selection
+start = st.selectbox("📍 From (Your Room):", list(campus_coords.keys()), index=0)
+end = st.selectbox("🎯 To (Destination Room):", list(campus_coords.keys()), index=3)
 
-        # 🌍 Create OSM Map with 3D Buildings
-        m = folium.Map(location=[22.303, 70.783], zoom_start=18, tiles="cartodbpositron")
+# HTML + JS for MapLibre + Routing
+maplibre_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Campus Navigation</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+<link href="https://unpkg.com/leaflet/dist/leaflet.css" rel="stylesheet" />
+<link href="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.css" rel="stylesheet" />
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine/dist/leaflet-routing-machine.js"></script>
+<style>
+  body {{ margin:0; padding:0; }}
+  #map {{ position:absolute; top:0; bottom:0; width:100%; height:100%; }}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+    // Create map
+    var map = L.map('map').setView([{campus_coords[start][1]}, {campus_coords[start][0]}], 17);
 
-        # Add 3D building layer (using OSM Buildings)
-        folium.TileLayer(
-            tiles="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-            attr="OpenStreetMap"
-        ).add_to(m)
+    // Load MapLibre tiles (OpenStreetMap free style)
+    L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+        maxZoom: 20,
+        attribution: '© OpenStreetMap contributors'
+    }}).addTo(map);
 
-        # Path
-        route_coords = [coords[node] for node in path]
-        folium.PolyLine(route_coords, color="blue", weight=6).add_to(m)
+    // Add routing
+    L.Routing.control({{
+        waypoints: [
+            L.latLng({campus_coords[start][1]}, {campus_coords[start][0]}),
+            L.latLng({campus_coords[end][1]}, {campus_coords[end][0]})
+        ],
+        routeWhileDragging: false,
+        lineOptions: {{ styles: [{{color: 'blue', weight: 5}}] }},
+        createMarker: function(i, wp, nWps) {{
+            return L.marker(wp.latLng, {{
+                icon: L.icon({{
+                    iconUrl: i === 0 ? 'https://cdn-icons-png.flaticon.com/512/684/684908.png'
+                                     : 'https://cdn-icons-png.flaticon.com/512/149/149059.png',
+                    iconSize: [30, 30]
+                }})
+            }});
+        }}
+    }}).addTo(map);
+</script>
+</body>
+</html>
+"""
 
-        # Markers
-        folium.Marker(coords[start], popup="Start", icon=folium.Icon(color="green")).add_to(m)
-        folium.Marker(coords[end], popup="End", icon=folium.Icon(color="red")).add_to(m)
-
-        # Display stable map (no blinking ✨)
-        st_folium(m, width=900, height=600)
-
-        # Directions
-        st.subheader("📝 Step-by-Step Directions")
-        for i in range(len(path) - 1):
-            st.write(f"➡️ Walk from **{path[i]}** to **{path[i+1]}**")
-
-    except nx.NetworkXNoPath:
-        st.error("⚠️ No path found between selected rooms.")
+# Show inside Streamlit
+components.html(maplibre_html, height=600)
