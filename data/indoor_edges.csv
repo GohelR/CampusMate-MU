@@ -1,6 +1,0 @@
-start,end,distance,action
-MB101,MB107,10,walk
-MB107,MB_ENT1,20,walk
-MB201,MB_ENT1,25,walk
-MA_ENT1,MA202,20,walk
-MA202,MA407,30,stairs_up

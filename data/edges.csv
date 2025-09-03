@@ -1,0 +1,8 @@
+from,to,distance,type
+MB101,MB_COR1,5,walk
+MB102,MB_COR1,5,walk
+MB_COR1,MB_ST1,10,walk
+MB_ST1,MB_ST1F2,5,stairs
+MB_ST1F2,MB_COR2,10,walk
+MB201,MB_COR2,5,walk
+MB202,MB_COR2,5,walk
