@@ -1,9 +1,26 @@
 room,name,building,floor,lat,lon,type
-MB101,Main Building Room 101,Main,1,0,0,room
-MB102,Main Building Room 102,Main,1,10,0,room
-MB_COR1,Corridor 1,Main,1,5,0,corridor
-MB_ST1,Staircase 1,Main,1,15,0,stairs
-MB201,Main Building Room 201,Main,2,0,10,room
-MB202,Main Building Room 202,Main,2,10,10,room
-MB_COR2,Corridor 2,Main,2,5,10,corridor
-MB_ST1F2,Staircase 1 (2F),Main,2,15,10,stairs
+MB101,Main Block Room 101,Main,1,0,0,room
+MB102,Main Block Room 102,Main,1,10,0,room
+MB_COR1,Main Block Corridor 1,Main,1,5,0,corridor
+MB_ST1,Main Block Staircase 1F,Main,1,15,0,stairs
+MB201,Main Block Room 201,Main,2,0,10,room
+MB202,Main Block Room 202,Main,2,10,10,room
+MB_COR2,Main Block Corridor 2,Main,2,5,10,corridor
+MB_ST1F2,Main Block Staircase 2F,Main,2,15,10,stairs
+
+LIB101,Library Room 101,Library,1,0,50,room
+LIB_COR1,Library Corridor 1,Library,1,5,50,corridor
+LIB_ST1,Library Staircase 1F,Library,1,15,50,stairs
+LIB201,Library Room 201,Library,2,0,60,room
+LIB202,Library Room 202,Library,2,10,60,room
+LIB_COR2,Library Corridor 2,Library,2,5,60,corridor
+LIB_ST1F2,Library Staircase 2F,Library,2,15,60,stairs
+
+HOS101,Hostel Room 101,Hostel,1,0,100,room
+HOS102,Hostel Room 102,Hostel,1,10,100,room
+HOS_COR1,Hostel Corridor 1,Hostel,1,5,100,corridor
+HOS_ST1,Hostel Staircase 1F,Hostel,1,15,100,stairs
+HOS201,Hostel Room 201,Hostel,2,0,110,room
+HOS202,Hostel Room 202,Hostel,2,10,110,room
+HOS_COR2,Hostel Corridor 2,Hostel,2,5,110,corridor
+HOS_ST1F2,Hostel Staircase 2F,Hostel,2,15,110,stairs
