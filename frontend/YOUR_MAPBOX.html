@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>3D Campus Navigation Demo</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <script src="https://api.mapbox.com/mapbox-gl-js/v2.18.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.18.0/mapbox-gl.css" rel="stylesheet" />
+  <style>
+    body { margin:0; padding:0; }
+    #map { position:absolute; top:0; bottom:0; width:100%; height:100vh; }
+    .controls { position:absolute; z-index:2; left:12px; top:12px; background:white; padding:8px; border-radius:8px; box-shadow:0 1px 4px rgba(0,0,0,0.2); }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<div class="controls">
+  <button id="startBtn">Start animation</button>
+</div>
+
+<script>
+  // ---- CONFIG ----
+  mapboxgl.accessToken = "MAPBOX_TOKEN"; // replace or inject from Streamlit
+  const center = [70.783, 22.303]; // [lon, lat] campus center
+
+  // Example route coordinates (lon, lat) — replace with route from your campus graph or Directions API result
+  const route = [
+    [70.781,22.301],
+    [70.782,22.302],
+    [70.783,22.303],
+    [70.784,22.304],
+    [70.785,22.305]
+  ];
+
+  // ---- Map init ----
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/streets-v12', // or 'mapbox://styles/mapbox/light-v11'
+    center: center,
+    zoom: 17,
+    pitch: 60, // tilt for 3D
+    bearing: -20,
+    antialias: true
+  });
+
+  map.on('load', () => {
+    // add 3D buildings (Mapbox style has building layer, but ensure style has 'building' source)
+    const layers = map.getStyle().layers;
+    const labelLayerId = layers.find(layer => layer.type === 'symbol' && layer.layout['text-field']).id;
+
+    // Add 3D buildings using Mapbox's building extrusions (if available)
+    map.addLayer({
+      'id': '3d-buildings',
+      'source': 'composite',
+      'source-layer': 'building',
+      'filter': ['==', 'extrude', 'true'],
+      'type': 'fill-extrusion',
+      'minzoom': 15,
+      'paint': {
+          'fill-extrusion-color': '#aaa',
+          'fill-extrusion-height': ['get', 'height'],
+          'fill-extrusion-base': ['get', 'min_height'],
+          'fill-extrusion-opacity': 0.85
+      }
+    }, labelLayerId);
+
+    // Add the route as a line
+    const routeGeoJSON = {
+      'type': 'Feature',
+      'geometry': {
+        'type': 'LineString',
+        'coordinates': route
+      }
+    };
+
+    map.addSource('route', { 'type': 'geojson', 'data': routeGeoJSON });
+    map.addLayer({
+      'id': 'route-line',
+      'type': 'line',
+      'source': 'route',
+      'layout': { 'line-join': 'round', 'line-cap': 'round' },
+      'paint': { 'line-color': '#0074ff', 'line-width': 6 }
+    });
+
+    // Add a moving marker (arrow)
+    const el = document.createElement('div');
+    el.style.width = '36px';
+    el.style.height = '36px';
+    el.style.backgroundImage = 'url(https://i.imgur.com/MK4NUzI.png)'; // example arrow/car icon
+    el.style.backgroundSize = 'contain';
+    el.style.transformOrigin = 'center';
+    el.style.transition = 'transform 0.1s linear';
+
+    const marker = new mapboxgl.Marker(el).setLngLat(route[0]).addTo(map);
+
+    // Animation function that moves along coordinates
+    let start = null;
+    let progress = 0; // between 0..(route.length-1)
+    let animId = null;
+    const pace = 0.0009; // tweak speed
+
+    // Helper: interpolate between two points
+    function lerp(a, b, t){
+      return a + (b - a) * t;
+    }
+
+    function animate(timestamp){
+      if (!start) start = timestamp;
+      const elapsed = timestamp - start;
+      // increase progress smoothly
+      progress = (elapsed * pace) / 16; // tweak divisor to control speed
+      const segIndex = Math.floor(progress);
+      const segT = progress - segIndex;
+
+      if (segIndex >= route.length - 1) {
+        marker.setLngLat(route[route.length - 1]);
+        cancelAnimationFrame(animId);
+        return;
+      }
+
+      const p0 = route[segIndex];
+      const p1 = route[segIndex + 1];
+      const lon = lerp(p0[0], p1[0], segT);
+      const lat = lerp(p0[1], p1[1], segT);
+
+      marker.setLngLat([lon, lat]);
+
+      // rotate marker to heading
+      const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
+      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      el.style.transform = `rotate(${90 - angle}deg)`;
+
+      animId = requestAnimationFrame(animate);
+    }
+
+    document.getElementById('startBtn').onclick = () => {
+      start = null; progress = 0;
+      if(animId) cancelAnimationFrame(animId);
+      animId = requestAnimationFrame(animate);
+    };
+  });
+</script>
+</body>
+</html>
