@@ -7,6 +7,7 @@ import json
 import streamlit.components.v1 as components
 from pathlib import Path
 from streamlit_js_eval import get_geolocation
+import math
 
 st.set_page_config(page_title="Campus Navigation", page_icon="🗺️", layout="wide")
 
@@ -18,8 +19,8 @@ st.markdown(
     </style>
     """, unsafe_allow_html=True
 )
-st.markdown('<div class="header"><h1>🏫 CampusMate : Indoor & Outdoor Navigation</h1></div>', unsafe_allow_html=True)
-st.markdown("DEMo")
+st.markdown('<div class="header"><h1>🏫 CampusMate — Indoor+Outdoor Navigation</h1></div>', unsafe_allow_html=True)
+st.markdown("This page uses your browser location (allow permission) and computes an indoor + outdoor route (demo) with a 3D MapLibre view and animated walker.")
 
 # ------------------------------
 # Data files
@@ -50,12 +51,42 @@ for _, r in edges_df.iterrows():
     action = str(r.get('action', 'walk'))
     G_indoor.add_edge(s, e, distance=dist, action=action)
 
+# ------------------------------
+# Helpers
+# ------------------------------
 def get_latlon(room):
     row = rooms_df[rooms_df['room'] == room]
     if row.empty:
         return None
     r = row.iloc[0]
     return float(r['lat']), float(r['lon']), int(r.get('floor', 0)), r.get('building', '')
+
+def get_room_label(room_id):
+    row = rooms_df[rooms_df['room'] == room_id]
+    if row.empty:
+        return str(room_id)
+    r = row.iloc[0]
+    if 'name' in rooms_df.columns and pd.notna(r.get('name', None)):
+        return f"{room_id} ({r['name']})"
+    return str(room_id)
+
+def turn_direction(a, b, c):
+    ax, ay = float(a['lon']), float(a['lat'])
+    bx, by = float(b['lon']), float(b['lat'])
+    cx, cy = float(c['lon']), float(c['lat'])
+    v1 = (bx-ax, by-ay)
+    v2 = (cx-bx, cy-by)
+    ang1 = math.atan2(v1[1], v1[0])
+    ang2 = math.atan2(v2[1], v2[0])
+    diff = math.degrees(ang2 - ang1)
+    while diff > 180: diff -= 360
+    while diff < -180: diff += 360
+    if abs(diff) < 25:
+        return "Go straight"
+    elif diff > 0:
+        return "Turn left"
+    else:
+        return "Turn right"
 
 def pick_entrance(building):
     rows = rooms_df[(rooms_df['building'] == building) & (rooms_df['is_entrance'] == True)]
@@ -99,7 +130,6 @@ def osrm_route(lon1, lat1, lon2, lat2):
             man = step.get('maneuver', {})
             name = step.get('name', '')
             dist = step.get('distance', 0)
-            # create readable instruction
             t = man.get('type','').replace('_',' ')
             mod = man.get('modifier','')
             instr_text = f"{t} {mod} → {name} ({int(dist)} m)".strip()
@@ -110,9 +140,8 @@ def osrm_route(lon1, lat1, lon2, lat2):
 # UI controls
 # ------------------------------
 st.sidebar.header("Navigation Controls")
-# Attempt to get browser geolocation
 st.sidebar.info("Please allow location access in your browser when prompted.")
-geo = get_geolocation()  # uses streamlit-js-eval to call navigator.geolocation
+geo = get_geolocation()
 user_lat = user_lon = None
 if geo and 'coords' in geo:
     user_lat = geo['coords'].get('latitude')
@@ -122,12 +151,10 @@ else:
     st.sidebar.warning("Location not available yet or permission denied. You can select a start manually below.")
 
 rooms = rooms_df['room'].astype(str).tolist()
-# Allow user to choose start: either detected location (use nearest room) or pick a room
 start_choice = st.sidebar.radio("Start from:", ("Use my current location", "Choose a room"), index=0)
 if start_choice == "Choose a room":
     start_room = st.sidebar.selectbox("From room:", rooms, index=0)
 else:
-    # we will compute nearest room/entrance once location available
     start_room = None
 
 end_room = st.sidebar.selectbox("To (destination room):", rooms, index=min(1, len(rooms)-1))
@@ -135,24 +162,20 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("**Map view** settings")
 pitch = st.sidebar.slider("Map tilt (3D pitch)", 0, 70, 55)
 bearing = st.sidebar.slider("Map bearing (rotation)", -180, 180, 0)
-map_style = st.sidebar.selectbox("Map style (tiles)", ["https://demotiles.maplibre.org/style.json",
-                                                       "https://tile.openstreetmap.org/{z}/{x}/{y}.png"], index=0)
 
 # ------------------------------
-# Determine start room if using GPS: pick nearest entrance or room
+# Determine start room if using GPS
 # ------------------------------
 if start_choice == "Use my current location":
     if user_lat is None or user_lon is None:
-        st.warning("Location permission needed to use 'Use my current location'. Please allow location access or choose a room manually.")
-        # fallback to allow selecting a room
+        st.warning("Location permission needed. Pick a room manually below.")
         start_room = st.selectbox("Fallback - pick start room:", rooms, index=0)
     else:
-        # compute nearest room by haversine approx
         def haversine(lat1, lon1, lat2, lon2):
-            import math
             R = 6371000.0
-            phi1 = math.radians(lat1); phi2 = math.radians(lat2)
-            dphi = math.radians(lat2 - lat1); dlambda = math.radians(lon2 - lon1)
+            phi1, phi2 = math.radians(lat1), math.radians(lat2)
+            dphi = math.radians(lat2 - lat1)
+            dlambda = math.radians(lon2 - lon1)
             a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
             return 2*R*math.asin(math.sqrt(a))
         nearest = None; nearest_dist = 1e12
@@ -160,9 +183,7 @@ if start_choice == "Use my current location":
             d = haversine(user_lat, user_lon, float(r['lat']), float(r['lon']))
             if d < nearest_dist:
                 nearest = r['room']; nearest_dist = d
-        # if nearest is far (>200m), prefer nearest entrance
         if nearest_dist > 200:
-            # find nearest entrance node
             entries = rooms_df[rooms_df['is_entrance'] == True]
             if not entries.empty:
                 nearest_e = None; nd = 1e12
@@ -175,18 +196,17 @@ if start_choice == "Use my current location":
                 start_room = nearest
         else:
             start_room = nearest
-        st.sidebar.info(f"Computed start location as: **{start_room}** (≈{int(nearest_dist)} m)")
+        st.sidebar.info(f"Computed start location: **{start_room}** (≈{int(nearest_dist)} m)")
 
 # ------------------------------
 # Compute combined route
 # ------------------------------
-combined_coords = []  # [ [lon, lat], ... ]
+combined_coords = []
 combined_instructions = []
 
 if start_room == end_room:
     st.info("You are already at the destination.")
 else:
-    # gather lat/lon/floor/building
     s_info = get_latlon(start_room)
     e_info = get_latlon(end_room)
     if s_info is None or e_info is None:
@@ -195,101 +215,93 @@ else:
     s_lat, s_lon, s_floor, s_building = s_info
     e_lat, e_lon, e_floor, e_building = e_info
 
-    # if same building -> indoor only
     if s_building == e_building:
         indoor_path, indoor_steps = compute_indoor_path(start_room, end_room)
         if indoor_path is None:
-            st.error("No indoor path found inside building.")
+            st.error("No indoor path found.")
         else:
             for node in indoor_path:
                 r = get_latlon(node)
                 if r:
                     combined_coords.append([r[1], r[0]])
-            for stp in indoor_steps:
+            for i, stp in enumerate(indoor_steps):
+                frm, to = stp['from'], stp['to']
+                frm_label, to_label = get_room_label(frm), get_room_label(to)
                 act = stp['action']
                 if act == 'stairs_up':
-                    combined_instructions.append(f"Take stairs up from {stp['from']} to {stp['to']}.")
+                    combined_instructions.append(f"Take stairs up from {frm_label} to {to_label}.")
                 elif act == 'stairs_down':
-                    combined_instructions.append(f"Take stairs down from {stp['from']} to {stp['to']}.")
+                    combined_instructions.append(f"Take stairs down from {frm_label} to {to_label}.")
                 elif act == 'elevator':
-                    combined_instructions.append(f"Use elevator from {stp['from']} to {stp['to']}.")
+                    combined_instructions.append(f"Use elevator from {frm_label} to {to_label}.")
                 else:
-                    combined_instructions.append(f"Walk from {stp['from']} to {stp['to']} ({int(stp['distance'])} m).")
+                    if i < len(indoor_path)-2:
+                        a = rooms_df[rooms_df['room'] == frm].iloc[0]
+                        b = rooms_df[rooms_df['room'] == to].iloc[0]
+                        c = rooms_df[rooms_df['room'] == indoor_path[i+2]].iloc[0]
+                        turn = turn_direction(a, b, c)
+                        combined_instructions.append(f"{turn} towards {to_label} ({int(stp['distance'])} m).")
+                    else:
+                        combined_instructions.append(f"Walk from {frm_label} to {to_label} ({int(stp['distance'])} m).")
     else:
-        # cross-building: indoor start -> outdoor (OSRM) -> indoor end
+        # cross-building logic unchanged, but use get_room_label in indoor steps
         start_entrance = pick_entrance(s_building)
         end_entrance = pick_entrance(e_building)
         indoor_path1, indoor_steps1 = compute_indoor_path(start_room, start_entrance)
         indoor_path2, indoor_steps2 = compute_indoor_path(end_entrance, end_room)
 
         if indoor_path1 is None or indoor_path2 is None:
-            st.warning("Missing indoor leg. Check indoor_edges.csv and entrances.")
+            st.warning("Missing indoor leg.")
         else:
-            # indoor start leg
-            for node in indoor_path1:
-                r = get_latlon(node)
-                if r:
-                    combined_coords.append([r[1], r[0]])
-            for stp in indoor_steps1:
+            for i, stp in enumerate(indoor_steps1):
+                frm, to = stp['from'], stp['to']
+                frm_label, to_label = get_room_label(frm), get_room_label(to)
                 act = stp['action']
-                if act == 'stairs_up':
-                    combined_instructions.append(f"Take stairs up from {stp['from']} to {stp['to']}.")
-                elif act == 'elevator':
-                    combined_instructions.append(f"Use elevator from {stp['from']} to {stp['to']}.")
+                if act in ['stairs_up','stairs_down','elevator']:
+                    combined_instructions.append(f"{act.replace('_',' ').title()} from {frm_label} to {to_label}.")
                 else:
-                    combined_instructions.append(f"Walk from {stp['from']} to {stp['to']} ({int(stp['distance'])} m).")
+                    combined_instructions.append(f"Walk from {frm_label} to {to_label} ({int(stp['distance'])} m).")
 
-            # OSRM outdoor
             s_ent = get_latlon(start_entrance)
             e_ent = get_latlon(end_entrance)
-            if s_ent is None or e_ent is None:
-                st.error("Entrance coordinates missing for one building.")
-            else:
-                s_ent_lat, s_ent_lon = s_ent[0], s_ent[1]
-                e_ent_lat, e_ent_lon = e_ent[0], e_ent[1]
-                osrm_coords, osrm_instrs = osrm_route(s_ent_lon, s_ent_lat, e_ent_lon, e_ent_lat)
-                if osrm_coords is None:
-                    # fallback line
-                    combined_coords.append([s_ent_lon, s_ent_lat])
-                    combined_coords.append([e_ent_lon, e_ent_lat])
-                    combined_instructions.append(f"Walk outdoors from {start_entrance} to {end_entrance}.")
-                else:
-                    for c in osrm_coords:
-                        combined_coords.append([c[0], c[1]])
+            if s_ent and e_ent:
+                osrm_coords, osrm_instrs = osrm_route(s_ent[1], s_ent[0], e_ent[1], e_ent[0])
+                if osrm_coords:
+                    combined_coords.extend(osrm_coords)
                     combined_instructions.extend(osrm_instrs)
-
-            # indoor end leg
-            for node in indoor_path2:
-                r = get_latlon(node)
-                if r:
-                    combined_coords.append([r[1], r[0]])
-            for stp in indoor_steps2:
-                act = stp['action']
-                if act == 'stairs_up':
-                    combined_instructions.append(f"Take stairs up from {stp['from']} to {stp['to']}.")
-                elif act == 'elevator':
-                    combined_instructions.append(f"Use elevator from {stp['from']} to {stp['to']}.")
                 else:
-                    combined_instructions.append(f"Walk from {stp['from']} to {stp['to']} ({int(stp['distance'])} m).")
+                    combined_coords.append([s_ent[1], s_ent[0]])
+                    combined_coords.append([e_ent[1], e_ent[0]])
+                    combined_instructions.append(f"Walk outdoors from {get_room_label(start_entrance)} to {get_room_label(end_entrance)}.")
 
-# If route empty, stop
+            for i, stp in enumerate(indoor_steps2):
+                frm, to = stp['from'], stp['to']
+                frm_label, to_label = get_room_label(frm), get_room_label(to)
+                act = stp['action']
+                if act in ['stairs_up','stairs_down','elevator']:
+                    combined_instructions.append(f"{act.replace('_',' ').title()} from {frm_label} to {to_label}.")
+                else:
+                    combined_instructions.append(f"Walk from {frm_label} to {to_label} ({int(stp['distance'])} m).")
+
+# ------------------------------
+# If route empty
+# ------------------------------
 if not combined_coords:
-    st.info("Could not compute route — check data in `data/`.")
+    st.info("Could not compute route — check data.")
     st.stop()
 
-# Save route and instructions into session so re-renders don't drop it
 st.session_state['campus_route_coords'] = combined_coords
 st.session_state['campus_route_instr'] = combined_instructions
 st.session_state['start_label'] = str(start_room)
 st.session_state['end_label'] = str(end_room)
 
 # ------------------------------
-# MapLibre frontend (3D, animated marker)
+# MapLibre frontend
 # ------------------------------
 route_json = json.dumps(st.session_state['campus_route_coords'])
 instr_json = json.dumps(st.session_state['campus_route_instr'])
-start_label = st.session_state['start_label'].replace("'", "\\'")
-end_label = st.session_state['end_label'].replace("'", "\\'")
+start_label = get_room_label(st.session_state['start_label']).replace("'", "\\'")
+end_label = get_room_label(st.session_state['end_label']).replace("'", "\\'")
 
 map_html = f"""
 <!doctype html>
@@ -311,20 +323,16 @@ map_html = f"""
 <div class="info"><b>Route:</b> {start_label} → {end_label}</div>
 <script>
   const route = {route_json};
-  const instrs = {instr_json};
-  const mid = route[Math.floor(route.length/2)];
   const map = new maplibregl.Map({{
     container: 'map',
     style: 'https://demotiles.maplibre.org/style.json',
-    center: mid,
+    center: route[Math.floor(route.length/2)],
     zoom: 17,
     pitch: {pitch},
     bearing: {bearing}
   }});
   map.addControl(new maplibregl.NavigationControl());
-
   map.on('load', () => {{
-    // add route source + layer
     const routeGeo = {{
       "type":"FeatureCollection",
       "features":[ {{
@@ -341,44 +349,17 @@ map_html = f"""
       layout:{{ 'line-join':'round','line-cap':'round' }},
       paint:{{ 'line-color':'#007bff','line-width':6,'line-opacity':0.9 }}
     }});
-
-    // start/end markers
-    new maplibregl.Marker({{ color:'green' }}).setLngLat(route[0]).setPopup(new maplibregl.Popup().setText('Start: {start_label}')).addTo(map);
-    new maplibregl.Marker({{ color:'red' }}).setLngLat(route[route.length-1]).setPopup(new maplibregl.Popup().setText('End: {end_label}')).addTo(map);
-
-    // fit bounds
-    const bounds = route.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(route[0], route[0]));
-    map.fitBounds(bounds, {{ padding: 60 }});
-
-    // animated dot
-    const dot = document.createElement('div');
-    dot.style.width = '18px'; dot.style.height = '18px'; dot.style.borderRadius = '50%';
-    dot.style.background = 'rgba(255,140,0,1)'; dot.style.boxShadow = '0 0 12px rgba(255,140,0,0.9)';
-    const marker = new maplibregl.Marker(dot).setLngLat(route[0]).addTo(map);
-
-    // animate along simple index steps (for demo)
-    let idx = 0;
-    const speedMs = 80;
-    function animateStep() {{
-      if (idx < route.length - 1) {{
-        idx++;
-        marker.setLngLat(route[idx]);
-        // smooth camera follow (optional)
-        // map.easeTo({{ center: route[idx], duration: speedMs }});
-        setTimeout(animateStep, speedMs);
-      }}
-    }}
-    setTimeout(animateStep, 600);
+    new maplibregl.Marker({{ color:'green' }}).setLngLat(route[0]).addTo(map);
+    new maplibregl.Marker({{ color:'red' }}).setLngLat(route[route.length-1]).addTo(map);
   }});
 </script>
 </body>
 </html>
 """
-
 components.html(map_html, height=750, scrolling=False)
 
 # ------------------------------
-# Directions / Instructions panel
+# Directions panel
 # ------------------------------
 st.markdown("## 📝 Turn-by-turn Directions")
 for i, ins in enumerate(st.session_state['campus_route_instr'], start=1):
