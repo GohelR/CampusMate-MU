@@ -1,39 +1,505 @@
-# pages/Campus_Navigation.py
-import streamlit as st
-import pandas as pd
-import networkx as nx
-import requests
+# pages/Campus_Navigation_All_Options.py
 import json
-import math
 from pathlib import Path
+
+import networkx as nx
+import pandas as pd
+import requests
+import streamlit as st
 import streamlit.components.v1 as components
 from streamlit_js_eval import get_geolocation
 
-# ==============================
-# Page setup
-# ==============================
-st.set_page_config(page_title="Campus Navigation", page_icon="🗺️", layout="wide")
+# ---------- Page setup ----------
+st.set_page_config(page_title="Campus Navigation — All Options", page_icon="🧭", layout="wide")
+st.markdown("""
+<style>
+:root { --glass: rgba(255,255,255,0.85); }
+.block { background: var(--glass); backdrop-filter: blur(8px); border-radius: 16px; padding: 14px 16px; box-shadow: 0 12px 28px rgba(0,0,0,0.08); }
+h1,h2,h3 { margin-top: 0.4rem; }
+.small { font-size: 0.9rem; opacity: 0.8; }
+</style>
+""", unsafe_allow_html=True)
 
-st.markdown(
-    """
-    <style>
-      .header { display:flex; gap:16px; align-items:center; }
-      .card { background: rgba(255,255,255,0.85); border-radius:12px; padding:12px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
-      .small { color:#666; font-size:12px; }
-      .pill { background:#eef3ff; color:#2f5cff; padding:2px 8px; border-radius:999px; font-size:12px; margin-left:6px; }
-      .kpi { display:flex; gap:16px; margin: 8px 0 16px; }
-      .kpi > div { background:#fff; border:1px solid #eee; border-radius:12px; padding:10px 12px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
-      .dir-table thead th { position: sticky; top:0; background:#fafafa; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-st.markdown('<div class="header"><h1>🏫 CampusMate — Indoor + Outdoor Navigation</h1></div>', unsafe_allow_html=True)
-st.markdown("Allow your browser’s location when prompted. We’ll compute a combined indoor/outdoor route with a 3D MapLibre view and an animated walker.")
+st.title("🧭 CampusMate — All-Options Navigation (3D, GPS, Indoor+Outdoor)")
 
-# ==============================
-# Data
-# ==============================
+# ---------- Data loading helpers ----------
+def read_nodes_edges(nodes_file: Path, edges_file: Path):
+    nodes = pd.read_csv(nodes_file)
+    edges = pd.read_csv(edges_file)
+    # normalize
+    nodes["id"] = nodes["id"].astype(str)
+    if "is_entrance" in nodes:
+        nodes["is_entrance"] = nodes["is_entrance"].astype(str).str.lower().isin(["true","1","yes"])
+    else:
+        nodes["is_entrance"] = False
+    # types
+    nodes["lat"] = nodes["lat"].astype(float)
+    nodes["lon"] = nodes["lon"].astype(float)
+    if "floor" in nodes:
+        nodes["floor"] = nodes["floor"].fillna(0).astype(int)
+    else:
+        nodes["floor"] = 0
+    nodes["building"] = nodes.get("building", pd.Series(["?"]*len(nodes))).astype(str)
+
+    edges["u"] = edges["u"].astype(str)
+    edges["v"] = edges["v"].astype(str)
+    if "distance" not in edges:
+        edges["distance"] = 1.0
+    edges["distance"] = edges["distance"].astype(float)
+    edges["action"] = edges.get("action", pd.Series(["walk"]*len(edges))).astype(str)
+    return nodes, edges
+
+def build_graph(nodes_df: pd.DataFrame, edges_df: pd.DataFrame):
+    G = nx.Graph()
+    for _, r in nodes_df.iterrows():
+        G.add_node(
+            r["id"],
+            name=str(r.get("name", r["id"])),
+            lat=float(r["lat"]),
+            lon=float(r["lon"]),
+            building=str(r.get("building","?")),
+            floor=int(r.get("floor", 0)),
+            is_entrance=bool(r.get("is_entrance", False)),
+        )
+    for _, r in edges_df.iterrows():
+        G.add_edge(r["u"], r["v"], distance=float(r["distance"]), action=str(r["action"]))
+    return G
+
+def haversine(lat1, lon1, lat2, lon2):
+    import math
+    R = 6371000.0
+    phi1 = math.radians(lat1); phi2 = math.radians(lat2)
+    dphi = math.radians(lat2 - lat1); dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    return 2*R*math.asin(math.sqrt(a))
+
+def nearest_node_by_gps(nodes_df: pd.DataFrame, lat, lon, prefer_entrance_if_far=True):
+    nearest = None; dmin = 10**12
+    for _, r in nodes_df.iterrows():
+        d = haversine(lat, lon, r["lat"], r["lon"])
+        if d < dmin:
+            nearest = r["id"]; dmin = d
+    if prefer_entrance_if_far and dmin > 200:
+        ents = nodes_df[nodes_df["is_entrance"] == True]
+        if not ents.empty:
+            n2 = None; d2min = 10**12
+            for _, r in ents.iterrows():
+                d2 = haversine(lat, lon, r["lat"], r["lon"])
+                if d2 < d2min:
+                    n2 = r["id"]; d2min = d2
+            return n2, d2min
+    return nearest, dmin
+
+def osrm_route(lon1, lat1, lon2, lat2):
+    url = f"http://router.project-osrm.org/route/v1/walking/{lon1},{lat1};{lon2},{lat2}"
+    params = {"overview":"full","geometries":"geojson","steps":"true"}
+    try:
+        resp = requests.get(url, params=params, timeout=12)
+        if resp.status_code != 200:
+            return None, []
+        data = resp.json()
+        if not data.get("routes"):
+            return None, []
+        route = data["routes"][0]
+        coords = route["geometry"]["coordinates"]  # [lon,lat]
+        instrs = []
+        for leg in route.get("legs", []):
+            for step in leg.get("steps", []):
+                man = step.get("maneuver", {})
+                name = step.get("name", "")
+                dist = step.get("distance", 0)
+                t = man.get("type","").replace("_"," ")
+                mod = man.get("modifier","")
+                text = f"{t} {mod} → {name} ({int(dist)} m)".strip()
+                instrs.append(text)
+        return coords, instrs
+    except Exception:
+        return None, []
+
+# ---------- Sidebar: Data ----------
+with st.sidebar:
+    st.header("📦 Data")
+    nodes_upl = st.file_uploader("Upload nodes.csv", type=["csv"], key="nodes_upl")
+    edges_upl = st.file_uploader("Upload edges.csv", type=["csv"], key="edges_upl")
+    st.caption("Or keep empty to use `data/nodes.csv` and `data/edges.csv` from the repo.")
+
+# Load nodes/edges (uploaded or from data/)
+data_dir = Path("data")
+try:
+    if nodes_upl and edges_upl:
+        nodes_df = pd.read_csv(nodes_upl)
+        edges_df = pd.read_csv(edges_upl)
+        # normalize
+        nodes_df, edges_df = read_nodes_edges(nodes_df.to_csv(index=False), edges_df.to_csv(index=False))  # not used; we re-validate below
+        # Reparse properly (above line is awkward for UploadedFile). Do again neatly:
+        nodes_upl.seek(0); edges_upl.seek(0)
+        nodes_df = pd.read_csv(nodes_upl)
+        edges_df = pd.read_csv(edges_upl)
+    else:
+        nodes_df, edges_df = read_nodes_edges(data_dir/"nodes.csv", data_dir/"edges.csv")
+except Exception as e:
+    st.error(f"❌ Failed to load data: {e}")
+    st.stop()
+
+# Final normalize (ensure schema)
+nodes_df, edges_df = read_nodes_edges(nodes_df if isinstance(nodes_df, Path) else nodes_df, edges_df if isinstance(edges_df, Path) else edges_df)
+
+# Build graph
+G = build_graph(nodes_df, edges_df)
+
+# ---------- Sidebar: Layers & Map ----------
+with st.sidebar:
+    st.header("🗺️ Map & Layers")
+    pitch = st.slider("3D tilt (pitch)", 0, 70, 55)
+    bearing = st.slider("Rotation (bearing)", -180, 180, 0)
+    show_nodes = st.checkbox("Show nodes", True)
+    show_edges = st.checkbox("Show edges", True)
+    show_entrances = st.checkbox("Highlight entrances", True)
+    animate_route = st.checkbox("Animate route", True)
+    st.markdown("---")
+    st.info("Allow browser **location** for GPS start.")
+    geo = get_geolocation()
+    gps_lat = geo["coords"]["latitude"] if geo and "coords" in geo else None
+    gps_lon = geo["coords"]["longitude"] if geo and "coords" in geo else None
+    if gps_lat and gps_lon:
+        st.success(f"GPS: {gps_lat:.6f}, {gps_lon:.6f}")
+    else:
+        st.warning("GPS not available yet, or permission denied.")
+
+# ---------- Routing controls ----------
+st.markdown("### 🎯 Routing", help="Pick start & destination. You can start from GPS.")
+col1, col2, col3 = st.columns([1.2,1.2,0.8])
+
+all_nodes = nodes_df["id"].tolist()
+with col1:
+    start_mode = st.radio("Start point", ["Use my GPS", "Choose node"], horizontal=True)
+    if start_mode == "Choose node":
+        start_node = st.selectbox("From node (room/poi):", all_nodes, index=0, key="start_node_select")
+    else:
+        start_node = None
+
+with col2:
+    end_node = st.selectbox("To node (room/poi):", all_nodes, index=min(1, len(all_nodes)-1), key="end_node_select")
+
+with col3:
+    route_btn = st.button("Compute Route 🚀", use_container_width=True)
+
+# Keep results in session to avoid re-render blinking
+if "route_coords" not in st.session_state:
+    st.session_state["route_coords"] = []
+    st.session_state["route_steps"] = []
+    st.session_state["route_nodes"] = []
+
+def node_info(nid):
+    a = G.nodes[nid]
+    return a["lat"], a["lon"], a["building"], a["floor"], a["name"]
+
+def path_to_coords(path_nodes):
+    coords = []
+    for nid in path_nodes:
+        lat, lon, *_ = node_info(nid)
+        coords.append([lon, lat])  # lng,lat for MapLibre
+    return coords
+
+# ---------- Compute route ----------
+if route_btn:
+    try:
+        # Determine start node
+        if start_mode == "Use my GPS":
+            if gps_lat is None or gps_lon is None:
+                st.warning("GPS not available; choose a start node.")
+                st.stop()
+            start_node, d0 = nearest_node_by_gps(nodes_df, gps_lat, gps_lon, prefer_entrance_if_far=True)
+            st.info(f"Start snapped to nearest node: **{start_node}** (≈{int(d0)} m)")
+        # sanity
+        if start_node == end_node:
+            st.info("Already at destination.")
+            st.stop()
+
+        s_bld = G.nodes[start_node]["building"]
+        e_bld = G.nodes[end_node]["building"]
+
+        full_coords = []
+        all_steps = []
+        full_path_nodes = []
+
+        # If buildings differ and you have an outdoor edge between entrances, we can simply run shortest_path on the joint graph.
+        # This will naturally traverse indoor nodes → entrance → outdoor → entrance → indoor nodes.
+        # If no explicit outdoor edges exist, we can OSRM between entrances as a fallback.
+        try:
+            path = nx.shortest_path(G, source=start_node, target=end_node, weight="distance")
+            full_path_nodes = path
+            # Build textual steps from edge actions
+            for i in range(len(path)-1):
+                u, v = path[i], path[i+1]
+                data = G.get_edge_data(u, v)
+                action = data.get("action", "walk")
+                dist = int(data.get("distance", 0))
+                if action == "stairs_up":
+                    all_steps.append(f"Take stairs up from {u} to {v} ({dist} m).")
+                elif action == "stairs_down":
+                    all_steps.append(f"Take stairs down from {u} to {v} ({dist} m).")
+                elif action == "elevator":
+                    all_steps.append(f"Use elevator from {u} to {v} ({dist} m).")
+                elif action == "outdoor":
+                    all_steps.append(f"Walk outdoors from {u} to {v} ({dist} m).")
+                else:
+                    all_steps.append(f"Walk from {u} to {v} ({dist} m).")
+            full_coords = path_to_coords(path)
+        except nx.NetworkXNoPath:
+            # Fallback: OSRM between nearest entrances of buildings, then indoor on each side.
+            def pick_entrance(building):
+                cand = [n for n, d in G.nodes(data=True) if d.get("building")==building and d.get("is_entrance", False)]
+                return cand[0] if cand else None
+            s_ent = pick_entrance(s_bld)
+            e_ent = pick_entrance(e_bld)
+            if s_ent is None or e_ent is None:
+                st.error("No path & missing entrances for OSRM fallback. Add entrance nodes or outdoor edges.")
+                st.stop()
+            # indoor start to entrance
+            in1 = nx.shortest_path(G, start_node, s_ent, weight="distance")
+            # OSRM outdoors
+            s_lat, s_lon, *_ = node_info(s_ent)
+            e_lat, e_lon, *_ = node_info(e_ent)
+            osrm_coords, osrm_instr = osrm_route(s_lon, s_lat, e_lon, e_lat)
+            # indoor entrance to end
+            in2 = nx.shortest_path(G, e_ent, end_node, weight="distance")
+
+            # Combine coords
+            full_path_nodes = in1 + [e_ent] + in2  # nodes list (approx)
+            full_coords = path_to_coords(in1)
+            if osrm_coords:
+                full_coords.extend(osrm_coords)
+            full_coords.extend(path_to_coords(in2))
+
+            # text steps
+            def add_edge_steps(p):
+                for i in range(len(p)-1):
+                    u, v = p[i], p[i+1]
+                    ed = G.get_edge_data(u, v)
+                    dist = int(ed.get("distance", 0)) if ed else 0
+                    act = (ed or {}).get("action", "walk")
+                    all_steps.append(f"{act.replace('_',' ').title()} from {u} to {v} ({dist} m).")
+            add_edge_steps(in1)
+            if osrm_coords:
+                all_steps.extend(osrm_instr)
+            add_edge_steps(in2)
+
+        st.session_state["route_coords"] = full_coords
+        st.session_state["route_steps"] = all_steps
+        st.session_state["route_nodes"] = full_path_nodes
+
+    except Exception as e:
+        st.error(f"Routing failed: {e}")
+
+# ---------- Map render ----------
+route_coords = st.session_state.get("route_coords", [])
+route_steps = st.session_state.get("route_steps", [])
+route_nodes = st.session_state.get("route_nodes", [])
+
+# Prepare GeoJSON for nodes & edges layers
+def nodes_geojson(df):
+    feats = []
+    for _, r in df.iterrows():
+        feats.append({
+            "type":"Feature",
+            "properties":{
+                "id": r["id"],
+                "name": str(r.get("name", r["id"])),
+                "building": str(r.get("building","?")),
+                "floor": int(r.get("floor",0)),
+                "is_entrance": bool(r.get("is_entrance", False)),
+            },
+            "geometry":{"type":"Point","coordinates":[float(r["lon"]), float(r["lat"])]}
+        })
+    return {"type":"FeatureCollection","features":feats}
+
+def edges_geojson(G):
+    feats=[]
+    for u,v,data in G.edges(data=True):
+        a=G.nodes[u]; b=G.nodes[v]
+        feats.append({
+            "type":"Feature",
+            "properties":{
+                "u":u,"v":v,
+                "action":data.get("action","walk"),
+                "distance":float(data.get("distance",0))
+            },
+            "geometry":{"type":"LineString","coordinates":[[a["lon"],a["lat"]],[b["lon"],b["lat"]]]}
+        })
+    return {"type":"FeatureCollection","features":feats}
+
+nodes_fc = nodes_geojson(nodes_df)
+edges_fc = edges_geojson(G)
+route_fc = {
+    "type":"FeatureCollection",
+    "features":[{"type":"Feature","properties":{},"geometry":{"type":"LineString","coordinates":route_coords}}]
+} if route_coords else {"type":"FeatureCollection","features":[]}
+
+# Map center
+if route_coords:
+    center = route_coords[len(route_coords)//2]
+else:
+    # mean center of nodes
+    if len(nodes_df):
+        center = [nodes_df["lon"].mean(), nodes_df["lat"].mean()]
+    else:
+        center = [70.783, 22.303]
+
+map_html = f"""
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Campus 3D Map</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+<link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<style>
+  html,body,#map{{height:70vh;margin:0;padding:0}}
+  .legend {{ position:absolute; right:10px; top:10px; background:rgba(255,255,255,0.9); padding:8px 12px; border-radius:8px; box-shadow:0 8px 18px rgba(0,0,0,.15); font: 13px/1.4 Arial; }}
+  .dot {{ display:inline-block; width:10px;height:10px;border-radius:50%;margin-right:6px; }}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="legend">
+  <div><span class="dot" style="background:#1f78b4"></span>Route</div>
+  <div><span class="dot" style="background:#34a853"></span>Entrances</div>
+  <div><span class="dot" style="background:#666"></span>Nodes</div>
+</div>
+<script>
+const pitch = {pitch};
+const bearing = {bearing};
+const nodes = {json.dumps(nodes_fc)};
+const edges = {json.dumps(edges_fc)};
+const route = {json.dumps(route_fc)};
+const showNodes = {str(show_nodes).lower()};
+const showEdges = {str(show_edges).lower()};
+const showEntrances = {str(show_entrances).lower()};
+const animate = {str(animate_route).lower()};
+
+const map = new maplibregl.Map({{
+    container: 'map',
+    style: 'https://demotiles.maplibre.org/style.json',
+    center: [{center[0]}, {center[1]}],
+    zoom: 17, pitch: pitch, bearing: bearing
+}});
+map.addControl(new maplibregl.NavigationControl());
+
+map.on('load', () => {{
+  // Nodes
+  map.addSource('nodes', {{ type:'geojson', data: nodes }});
+  map.addLayer({{
+    id:'nodes-circles',
+    type:'circle',
+    source:'nodes',
+    paint:{{
+      'circle-radius': 5,
+      'circle-color': ['case',['get','is_entrance'],'#34a853','#666'],
+      'circle-stroke-color':'#fff',
+      'circle-stroke-width': 1
+    }},
+    layout: {{ 'visibility': showNodes ? 'visible' : 'none' }}
+  }});
+
+  // Labels
+  map.addLayer({{
+    id:'nodes-labels',
+    type:'symbol',
+    source:'nodes',
+    layout:{{
+      'text-field': ['get','id'],
+      'text-size': 11,
+      'text-offset': [0, 1.1],
+      'visibility': showNodes ? 'visible' : 'none'
+    }},
+    paint: {{ 'text-color': '#111', 'text-halo-color':'#fff','text-halo-width':1 }}
+  }});
+
+  // Entrances highlight (extra glow)
+  if (showEntrances) {{
+    map.addLayer({{
+      id:'nodes-entrances',
+      type:'circle',
+      source:'nodes',
+      filter:['==',['get','is_entrance'], true],
+      paint:{{ 'circle-radius': 10, 'circle-color':'rgba(52,168,83,0.15)' }}
+    }});
+  }}
+
+  // Edges
+  map.addSource('edges', {{ type:'geojson', data: edges }});
+  map.addLayer({{
+    id:'edges-line',
+    type:'line',
+    source:'edges',
+    paint:{{ 'line-color':'#999','line-width':2,'line-opacity':0.7 }},
+    layout: {{ 'visibility': showEdges ? 'visible' : 'none' }}
+  }});
+
+  // Route
+  map.addSource('route', {{ type:'geojson', data: route }});
+  map.addLayer({{
+    id:'route-line',
+    type:'line',
+    source:'route',
+    paint:{{ 'line-color':'#1f78b4','line-width':6,'line-opacity':0.9 }}
+  }});
+
+  // Fit to route if exists else to all nodes
+  const fc = route.features;
+  if (fc && fc.length && fc[0].geometry.coordinates.length) {{
+    const coords = fc[0].geometry.coordinates;
+    const b = coords.reduce((b,c)=>b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(b, {{ padding: 60 }});
+  }} else if (nodes.features.length) {{
+    const coords = nodes.features.map(f=>f.geometry.coordinates);
+    const b = coords.reduce((b,c)=>b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
+    map.fitBounds(b, {{ padding: 60 }});
+  }}
+
+  // Animated marker along the route
+  if (animate && route.features.length && route.features[0].geometry.coordinates.length > 1) {{
+    const coords = route.features[0].geometry.coordinates;
+    const dot = document.createElement('div');
+    dot.style.width='18px'; dot.style.height='18px'; dot.style.borderRadius='50%';
+    dot.style.background='rgba(255,140,0,1)'; dot.style.boxShadow='0 0 12px rgba(255,140,0,0.9)';
+    const walker = new maplibregl.Marker(dot).setLngLat(coords[0]).addTo(map);
+    let i=0;
+    const speed=70;
+    const step=()=>{{ if(i<coords.length-1){{ i++; walker.setLngLat(coords[i]); setTimeout(step, speed); }} }};
+    setTimeout(step, 500);
+  }}
+}});
+</script>
+</body>
+</html>
+"""
+
+st.markdown("<div class='block'>", unsafe_allow_html=True)
+components.html(map_html, height=540, scrolling=False)
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------- Directions ----------
+st.markdown("### 📝 Turn-by-Turn")
+if route_steps:
+    for i, line in enumerate(route_steps, start=1):
+        st.write(f"{i}. {line}")
+else:
+    st.write("_No route yet. Choose start/destination and click **Compute Route**._")
+
+# ---------- Export ----------
+st.markdown("### 📤 Export")
+if route_coords:
+    gj = {
+        "type":"FeatureCollection",
+        "features":[{"type":"Feature","properties":{"name":"CampusMate Route"},"geometry":{"type":"LineString","coordinates":route_coords}}]
+    }
+    st.download_button("Download Route GeoJSON", data=json.dumps(gj).encode("utf-8"),
+                       file_name="campusmate_route.geojson", mime="application/geo+json")
+else:
+    st.caption("Route export available after you compute a route.")
 rooms_path = Path("data/rooms.csv")
 indoor_edges_path = Path("data/indoor_edges.csv")
 
