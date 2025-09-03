@@ -22,6 +22,5 @@ HOS_ST1F2,HOS_COR2,10,walk
 HOS201,HOS_COR2,5,walk
 HOS202,HOS_COR2,5,walk
 
-# Connect buildings (outdoor links as corridors)
 MB_COR1,LIB_COR1,30,walk
 LIB_COR1,HOS_COR1,40,walk
