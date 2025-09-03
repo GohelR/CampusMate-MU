@@ -10,3 +10,4 @@ plotly
 streamlit-folium
 folium
 networkx
+pydeck==0.9.1
