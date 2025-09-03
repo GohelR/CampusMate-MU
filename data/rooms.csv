@@ -1,8 +1,9 @@
-room,lat,lon,floor,building,is_entrance
-MB101,22.30100,70.78100,1,MB,False
-MB107,22.30120,70.78120,1,MB,False
-MB_ENT1,22.30080,70.78150,0,MB,True
-MB201,22.30300,70.78300,2,MB,False
-MA_ENT1,22.30350,70.78350,0,MA,True
-MA202,22.30500,70.78500,2,MA,False
-MA407,22.30600,70.78600,3,MA,False
+room,name,building,floor,lat,lon,type
+MB101,Main Building Room 101,Main,1,0,0,room
+MB102,Main Building Room 102,Main,1,10,0,room
+MB_COR1,Corridor 1,Main,1,5,0,corridor
+MB_ST1,Staircase 1,Main,1,15,0,stairs
+MB201,Main Building Room 201,Main,2,0,10,room
+MB202,Main Building Room 202,Main,2,10,10,room
+MB_COR2,Corridor 2,Main,2,5,10,corridor
+MB_ST1F2,Staircase 1 (2F),Main,2,15,10,stairs
