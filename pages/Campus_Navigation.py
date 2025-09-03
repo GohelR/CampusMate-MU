@@ -1,163 +1,72 @@
+# streamlit_app.py (add or merge into your existing app)
 import streamlit as st
-import pandas as pd
-import networkx as nx
+import json
+import os
+import streamlit.components.v1 as components
+from pathlib import Path
 
-st.set_page_config(page_title="Campus Navigation", page_icon="🗺️", layout="wide")
-st.title("🗺️ Campus Navigation Guide (3D WOW)")
+st.set_page_config(page_title="CampusMate Map", layout="wide")
 
-# -------------------------
-# Load campus graph
-# -------------------------
-CSV_FILE = "data/campus_graph.csv"
+# 1) Get Mapbox token & style
+mapbox_token = None
+style_url = "mapbox://styles/mapbox/standard"  # default if not provided
+
+# Try secrets first (recommended)
 try:
-    edges = pd.read_csv(CSV_FILE)
-except FileNotFoundError:
-    st.error(f"❌ Could not find {CSV_FILE}. Please upload it.")
+    mapbox_token = st.secrets["mapbox"]["token"]
+    style_url = st.secrets["mapbox"].get("style_url", style_url)
+except Exception:
+    mapbox_token = os.environ.get("MAPBOX_TOKEN")  # fallback
+
+if not mapbox_token:
+    st.warning("Mapbox token not found. Add it to .streamlit/secrets.toml or set MAPBOX_TOKEN as an environment variable.")
     st.stop()
 
-# Build graph
-G = nx.Graph()
-for _, row in edges.iterrows():
-    G.add_edge(row["start"], row["end"], weight=row["distance"])
+# 2) Load campus GeoJSON
+data_path = Path("data") / "campus.geojson"
+if not data_path.exists():
+    st.error(f"{data_path} not found. Add your campus.geojson and commit it.")
+    st.stop()
 
-# Room coordinates (replace with your real data)
-coords = {
-    "MB101": [70.781, 22.301],
-    "MB201": [70.783, 22.303],
-    "MA202": [70.785, 22.305],
-    "MA407": [70.786, 22.306],
-}
+campus_geojson = json.loads(data_path.read_text())
 
-rooms = list(coords.keys())
+# 3) Sidebar: simple search/filter
+st.sidebar.title("Campus Search")
+query = st.sidebar.text_input("Find building (type name, e.g. 'Library')")
 
-# -------------------------
-# User input
-# -------------------------
-start = st.selectbox("📍 From (Your Room):", rooms)
-end = st.selectbox("🎯 To (Destination Room):", rooms)
+matches = []
+for f in campus_geojson.get("features", []):
+    name = f.get("properties", {}).get("name","").lower()
+    if query.strip() == "" or query.strip().lower() in name:
+        matches.append(f)
 
-MAPBOX_TOKEN = st.secrets["MAPBOX_TOKEN"]
+st.sidebar.write(f"Found {len(matches)} result(s)")
+if len(matches) > 0:
+    for f in matches:
+        st.sidebar.write(f"- {f['properties'].get('name')}")
 
-# -------------------------
-# Compute route
-# -------------------------
-route_coords = []
-if st.button("🚀 Get 3D Directions"):
-    try:
-        path = nx.shortest_path(G, source=start, target=end, weight="distance")
-        st.success(" ➝ ".join(path))
+# Determine initial center: if matches non-empty, center on first match
+if matches:
+    center_lng, center_lat = matches[0]["geometry"]["coordinates"]
+else:
+    # fallback to first feature or default coords
+    if campus_geojson.get("features"):
+        center_lng, center_lat = campus_geojson["features"][0]["geometry"]["coordinates"]
+    else:
+        center_lng, center_lat = 72.525, 23.033
 
-        # convert to list of lon/lat
-        route_coords = [coords[node] for node in path]
+# 4) Read the HTML template and inject variables
+html_path = Path("frontend") / "map.html"
+if not html_path.exists():
+    st.error(f"{html_path} not found. Add the frontend template.")
+    st.stop()
 
-    except nx.NetworkXNoPath:
-        st.error("⚠️ No path found between selected rooms.")
+html = html_path.read_text()
+# replace placeholders (safe-ish): mapbox token, style, and geojson
+injected_html = html.replace("{{MAPBOX_TOKEN}}", mapbox_token)\
+                    .replace("{{STYLE_URL}}", style_url)\
+                    .replace("{{GEOJSON}}", json.dumps(campus_geojson))
 
-# -------------------------
-# Mapbox GL JS Embed
-# -------------------------
-if route_coords:
-    route_js = str(route_coords).replace("'", "")
-
-    html_code = f"""
-    <!doctype html>
-    <html>
-    <head>
-      <meta charset="utf-8" />
-      <title>Campus 3D Navigation</title>
-      <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-      <script src="https://api.mapbox.com/mapbox-gl-js/v2.18.0/mapbox-gl.js"></script>
-      <link href="https://api.mapbox.com/mapbox-gl-js/v2.18.0/mapbox-gl.css" rel="stylesheet" />
-      <style>
-        body {{ margin:0; padding:0; }}
-        #map {{ position:absolute; top:0; bottom:0; width:100%; height:100%; }}
-        .controls {{ position:absolute; z-index:2; left:12px; top:12px;
-          background:white; padding:8px; border-radius:8px; }}
-      </style>
-    </head>
-    <body>
-    <div id="map"></div>
-    <div class="controls">
-      <button onclick="startAnim()">▶ Start Navigation</button>
-    </div>
-    <script>
-      mapboxgl.accessToken = "{MAPBOX_TOKEN}";
-      const route = {route_js};
-
-      const map = new mapboxgl.Map({{
-        container: 'map',
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center: route[0],
-        zoom: 18,
-        pitch: 60,
-        bearing: -20,
-        antialias: true
-      }});
-
-      map.on('load', () => {{
-        // 3D buildings
-        const layers = map.getStyle().layers;
-        const labelLayerId = layers.find(
-          layer => layer.type === 'symbol' && layer.layout['text-field']
-        ).id;
-
-        map.addLayer({{
-          'id': '3d-buildings',
-          'source': 'composite',
-          'source-layer': 'building',
-          'filter': ['==', 'extrude', 'true'],
-          'type': 'fill-extrusion',
-          'minzoom': 15,
-          'paint': {{
-            'fill-extrusion-color': '#aaa',
-            'fill-extrusion-height': ['get', 'height'],
-            'fill-extrusion-base': ['get', 'min_height'],
-            'fill-extrusion-opacity': 0.85
-          }}
-        }}, labelLayerId);
-
-        // Route line
-        map.addSource('route', {{
-          'type': 'geojson',
-          'data': {{
-            'type': 'Feature',
-            'geometry': {{
-              'type': 'LineString',
-              'coordinates': route
-            }}
-          }}
-        }});
-
-        map.addLayer({{
-          'id': 'route-line',
-          'type': 'line',
-          'source': 'route',
-          'paint': {{ 'line-color': '#0074ff', 'line-width': 6 }}
-        }});
-
-        // Marker
-        const el = document.createElement('div');
-        el.style.width = '36px';
-        el.style.height = '36px';
-        el.style.backgroundImage = 'url(https://i.imgur.com/MK4NUzI.png)';
-        el.style.backgroundSize = 'contain';
-        const marker = new mapboxgl.Marker(el).setLngLat(route[0]).addTo(map);
-
-        let animId;
-        function animate(i) {{
-          if (i >= route.length) return;
-          marker.setLngLat(route[i]);
-          map.easeTo({{ center: route[i], zoom: 18, pitch: 60, bearing: -20 }});
-          animId = setTimeout(() => animate(i+1), 1000);
-        }}
-
-        window.startAnim = () => {{
-          animate(0);
-        }}
-      }});
-    </script>
-    </body>
-    </html>
-    """
-
-    st.components.v1.html(html_code, height=700, scrolling=False)
+# 5) Display
+st.title("🏫 Campus Map (Mapbox)")
+components.html(injected_html, height=720, scrolling=True)
