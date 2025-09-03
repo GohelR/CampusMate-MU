@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Campus Map</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <link href="https://api.mapbox.com/mapbox-gl-js/v2.16.0/mapbox-gl.css" rel="stylesheet">
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    .marker { background: #007cbf; color: white; border-radius: 50%; width: 30px; height: 30px; display:flex; align-items:center; justify-content:center; font-weight:700; }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<script src="https://api.mapbox.com/mapbox-gl-js/v2.16.0/mapbox-gl.js"></script>
+<script>
+  // These placeholders will be replaced by Streamlit before embedding:
+  const MAPBOX_TOKEN = "{{MAPBOX_TOKEN}}";
+  const STYLE_URL = "{{STYLE_URL}}";
+  const campusData = {{GEOJSON}}; // JSON object
+
+  mapboxgl.accessToken = MAPBOX_TOKEN;
+  const center = (campusData.features && campusData.features.length>0)
+    ? campusData.features[0].geometry.coordinates
+    : [72.525, 23.033];
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: STYLE_URL,
+    center: center,
+    zoom: 16,
+    pitch: 45
+  });
+
+  map.on('load', () => {
+    // Add campus points as a source
+    map.addSource('campus', { type: 'geojson', data: campusData });
+
+    // Add a symbol layer for points (uses built-in icons)
+    map.addLayer({
+      id: 'campus-points',
+      type: 'symbol',
+      source: 'campus',
+      layout: {
+        'icon-image': ['case',
+          ['==', ['get', 'type'], 'library'], 'library-15',
+          ['==', ['get', 'type'], 'cafeteria'], 'cafe-15',
+          'marker-15'
+        ],
+        'icon-allow-overlap': true,
+        'text-field': ['get', 'name'],
+        'text-offset': [0, 1.2],
+        'text-size': 12
+      }
+    });
+
+    // click -> popup
+    map.on('click', 'campus-points', (e) => {
+      const props = e.features[0].properties;
+      new mapboxgl.Popup()
+        .setLngLat(e.lngLat)
+        .setHTML(`<strong>${props.name}</strong><p>${props.popup || ''}</p>`)
+        .addTo(map);
+    });
+
+    // hover cursor
+    map.on('mouseenter', 'campus-points', () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', 'campus-points', () => map.getCanvas().style.cursor = '');
+
+    // 3D buildings (Mapbox Standard has 'building' source; add a fill-extrusion)
+    const layers = map.getStyle().layers;
+    let labelLayerId;
+    for (const l of layers) {
+      if (l.type === 'symbol' && l.layout && l.layout['text-field']) { labelLayerId = l.id; break; }
+    }
+    map.addLayer({
+      'id': '3d-buildings',
+      'source': 'composite',
+      'source-layer': 'building',
+      'filter': ['==', ['get', 'extrude'], 'true'],
+      'type': 'fill-extrusion',
+      'minzoom': 15,
+      'paint': {
+        'fill-extrusion-color': '#aaa',
+        'fill-extrusion-height': ['coalesce', ['get', 'height'], 0],
+        'fill-extrusion-base': ['coalesce', ['get', 'min_height'], 0],
+        'fill-extrusion-opacity': 0.9
+      }
+    }, labelLayerId);
+  });
+</script>
+</body>
+</html>
