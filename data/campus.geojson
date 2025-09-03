@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type":"Feature",
+      "properties":{"name":"Main Library","type":"library","popup":"Main Library — Open 8AM–10PM"},
+      "geometry":{"type":"Point","coordinates":[72.5250,23.0332]}
+    },
+    {
+      "type":"Feature",
+      "properties":{"name":"Block A (CSE)","type":"classroom","popup":"Block A — Computer Science"},
+      "geometry":{"type":"Point","coordinates":[72.5254,23.0334]}
+    },
+    {
+      "type":"Feature",
+      "properties":{"name":"Cafeteria","type":"cafeteria","popup":"Cafeteria — Ground floor"},
+      "geometry":{"type":"Point","coordinates":[72.5260,23.0330]}
+    }
+  ]
+}
